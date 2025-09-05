@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KPR Superposition Prototype</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>KPR – Szuperpozíciós audio prototípus</h1>
+    <p>3 sáv: Közép (állandó), Bal (balra fordítva erősödik), Jobb (jobbra fordítva erősödik).</p>
+
+    <section class="controls">
+      <button id="startBtn">Betöltés és indítás</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <div class="filetips">
+        <p>Helyezd el az <code>audio/center.mp3</code>, <code>audio/left.mp3</code>, <code>audio/right.mp3</code> fájlokat, majd töltsd fel az egész mappát egy HTTPS-es tárhelyre (pl. GitHub Pages / Netlify).</p>
+      </div>
+    </section>
+
+    <section class="status">
+      <div class="tile">
+        <div>Állapot: <span id="statusText">várakozás</span></div>
+        <div>Eszköz szenzor: <span id="sensorText">nincs engedély</span></div>
+        <div>Szög (γ – bal/jobb dőlés °): <span id="gammaVal">0</span></div>
+      </div>
+      <div class="meterWrap">
+        <div class="meterLabel">Bal sáv erősség</div>
+        <div class="meter"><div id="leftMeter"></div></div>
+        <div class="meterLabel">Közép sáv erősség</div>
+        <div class="meter"><div id="centerMeter"></div></div>
+        <div class="meterLabel">Jobb sáv erősség</div>
+        <div class="meter"><div id="rightMeter"></div></div>
+      </div>
+      <div class="fallback">
+        <label for="angleSlider">Ha a szenzor nem érhető el, húzd a csúszkát (−45° … +45°):</label>
+        <input id="angleSlider" type="range" min="-45" max="45" value="0" step="1" />
+      </div>
+    </section>
+
+    <footer>
+      <p>Tippek: iOS-en engedélyezd a Mozgás & Orientáció hozzáférést. AirPods/füles ajánlott.</p>
+    </footer>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
