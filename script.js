@@ -1,7 +1,7 @@
-/* KPR Superposition Prototype — slider-first fix
-   - Három sáv (left, center, right)
-   - Web Audio API + DeviceOrientation
-   - Ha megmozdítod a csúszkát → kézi (slider) módra vált és letiltja a szenzort
+/* KPR Superposition Prototype — HEAD + SLIDER + KEYBOARD + MOUSE
+   - Telefon: deviceorientation (gamma) vezérli a bal/jobb gaineket
+   - MacBook: automatikus fallback → csúszka, + nyilak + egérhúzás
+   - Equal-power crossfade, smoothing, deadzone
 */
 
 const startBtn = document.getElementById('startBtn');
@@ -20,23 +20,36 @@ const meters = {
 let ctx, gains = {}, sources = {}, buffers = {};
 let running = false;
 
-// --- ÁLLÍTSD BE MP3/WAV szerint ---
+// --- Audio fájlok (írj át mp3-ra, ha úgy exportálsz) ---
 const FILES = {
-  left:  'audio/left.wav',   // ha mp3-at használsz, írd át .mp3-ra
-  center:'audio/center.wav',
-  right: 'audio/right.wav'
+  left:  'left.wav',
+  center:'center.wav',
+  right: 'right.wav'
 };
 
 // ===== Segédek =====
 function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+
+const RANGE = 45;          // max döntés (±45°)
+const DEADZONE = 3;        // középen ennyi fokig halott zóna
+const SMOOTH_ALPHA = 0.15; // smoothing (0..1)
+
+function mapAngle(rawDeg){
+  let a = rawDeg;
+  if (Math.abs(a) < DEADZONE) a = 0;
+  a = clamp(a, -RANGE, RANGE);
+  return a;
+}
+
 function angleToGains(angleDeg){
-  const a = clamp(angleDeg, -45, 45);
-  const t = (a + 45) / 90; // 0..1
+  const a = mapAngle(angleDeg);
+  const t = (a + RANGE) / (2*RANGE); // 0..1
   const left = Math.cos(t * Math.PI * 0.5);
   const right = Math.sin(t * Math.PI * 0.5);
   const center = 1.0;
   return {left, center, right};
 }
+
 function updateMeters(g){
   meters.left.style.width = (g.left*100).toFixed(1)+'%';
   meters.center.style.width = (g.center*100).toFixed(1)+'%';
@@ -46,29 +59,40 @@ function updateMeters(g){
 // ===== Szenzor kezelés =====
 let sensorActive = false;
 let orientationHandler = null;
-let usingSlider = false; // ha true, csak a csúszka irányít
+let usingSlider = false;
+
+let smoothedGamma = 0;
+let calibratedOffset = 0;
 
 function applyAngle(angle){
+  if (!ctx) return;
   gammaVal.textContent = angle.toFixed(1);
   const g = angleToGains(angle);
   const t = ctx.currentTime;
-  gains.left.gain.linearRampToValueAtTime(g.left, t+0.05);
-  gains.center.gain.linearRampToValueAtTime(g.center, t+0.05);
+  gains.left.gain.linearRampToValueAtTime(g.left,   t+0.05);
+  gains.center.gain.linearRampToValueAtTime(g.center,t+0.05);
   gains.right.gain.linearRampToValueAtTime(g.right, t+0.05);
   updateMeters(g);
 }
 
+function calibrateCenter(initialGamma){ calibratedOffset = initialGamma || 0; }
+
 function enableOrientation(){
   if (sensorActive) return;
+  const getAdjustedGamma = (e)=>{
+    let g = (typeof e.gamma === 'number') ? e.gamma : 0;
+    g = g - calibratedOffset;
+    smoothedGamma = smoothedGamma + SMOOTH_ALPHA * (g - smoothedGamma);
+    return smoothedGamma;
+  };
   orientationHandler = (e)=>{
-    if (usingSlider) return;         // csúszka mód felülír mindent
-    if (e && typeof e.gamma === 'number') {
-      applyAngle(e.gamma);
-    }
+    if (usingSlider) return;
+    const g = getAdjustedGamma(e);
+    applyAngle(g);
   };
   window.addEventListener('deviceorientation', orientationHandler, {passive:true});
   sensorActive = true;
-  sensorText.textContent = 'szenzor aktív';
+  sensorText.textContent = 'szenzor aktív (fej/telefon forgatás)';
 }
 function disableOrientation(){
   if (!sensorActive) return;
@@ -78,15 +102,6 @@ function disableOrientation(){
   sensorText.textContent = 'kézi vezérlés (csúszka)';
 }
 
-// A csúszka MOSTANTÓL MINDIG él: első mozdítás → vált csúszka módra
-angleSlider.addEventListener('input', ()=>{
-  usingSlider = true;
-  if (sensorActive) disableOrientation();
-  const angle = parseFloat(angleSlider.value);
-  if (ctx) applyAngle(angle);
-});
-
-// iOS permission (ha kell)
 async function requestMotionPermissionIfNeeded(){
   try{
     const need = (window.DeviceMotionEvent && typeof window.DeviceMotionEvent.requestPermission === 'function')
@@ -100,6 +115,7 @@ async function requestMotionPermissionIfNeeded(){
   }catch{ return false; }
 }
 
+// ===== Audio betöltés =====
 async function loadBuffer(url){
   const res = await fetch(url);
   if(!res.ok) throw new Error('Hiba: '+url);
@@ -113,10 +129,9 @@ async function startAudio(){
   statusText.textContent = 'betöltés...';
   ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-  // fájlok betöltése
-  buffers.left = await loadBuffer(FILES.left);
+  buffers.left   = await loadBuffer(FILES.left);
   buffers.center = await loadBuffer(FILES.center);
-  buffers.right = await loadBuffer(FILES.right);
+  buffers.right  = await loadBuffer(FILES.right);
 
   const master = ctx.createGain(); master.gain.value = 1.0; master.connect(ctx.destination);
   gains.left = ctx.createGain(); gains.left.connect(master);
@@ -130,34 +145,35 @@ async function startAudio(){
   const now = ctx.currentTime + 0.05;
   sources.left.start(now); sources.center.start(now); sources.right.start(now);
 
-  // kezdeti állapot
-  const g0 = angleToGains(parseFloat(angleSlider.value) || 0);
-  gains.left.gain.setValueAtTime(g0.left, ctx.currentTime);
-  gains.center.gain.setValueAtTime(g0.center, ctx.currentTime);
-  gains.right.gain.setValueAtTime(g0.right, ctx.currentTime);
-  updateMeters(g0);
+  smoothedGamma = 0;
+  calibrateCenter(0);
+  applyAngle(0);
 
   statusText.textContent = 'fut';
   startBtn.disabled = true; stopBtn.disabled = false;
 
-  // szenzor próbálkozás — ha nem jön érdemi adat 2s alatt, marad a csúszka
-  let gotMeaningful = false;
-  const probeHandler = (e)=>{
-    if (typeof e.gamma === 'number' && Math.abs(e.gamma) > 0.5) { // ténylegesen változik
-      gotMeaningful = true;
-    }
-  };
-  window.addEventListener('deviceorientation', probeHandler, {passive:true});
+  usingSlider = false;
   const granted = await requestMotionPermissionIfNeeded();
-  if (granted) enableOrientation();
+
+  let gotMeaningful = false;
+  const probe = (e)=>{
+    if (typeof e.gamma === 'number' && Math.abs(e.gamma) > 0.5) gotMeaningful = true;
+  };
+  window.addEventListener('deviceorientation', probe, {passive:true});
+
+  if (granted) {
+    enableOrientation();
+  } else {
+    sensorText.textContent = 'engedély megtagadva → csúszka mód';
+    usingSlider = true;
+  }
 
   setTimeout(()=>{
-    window.removeEventListener('deviceorientation', probeHandler);
-    if (!gotMeaningful) { // nem jön érdemi adat → maradjon csúszka
+    window.removeEventListener('deviceorientation', probe);
+    if (!gotMeaningful) {
       usingSlider = true;
       disableOrientation();
     }
-    // ha jött adat, akkor sensorActive marad; ha megmozdítod a csúszkát, akkor bármikor átvált kézire
   }, 2000);
 }
 
@@ -173,5 +189,48 @@ function stopAudio(){
   statusText.textContent = 'leállítva';
 }
 
+// ===== Csúszka fallback =====
+angleSlider.addEventListener('input', ()=>{
+  if (!running) return;
+  usingSlider = true;
+  disableOrientation();
+  const angle = parseFloat(angleSlider.value) || 0;
+  applyAngle(angle);
+});
+
+// ===== Billentyű: bal/jobbra nyíl =====
+window.addEventListener('keydown', (e)=>{
+  if (!running) return;
+  const step = 2;
+  if (e.key === 'ArrowLeft') {
+    angleSlider.value = Math.max(-45, parseFloat(angleSlider.value) - step);
+    angleSlider.dispatchEvent(new Event('input'));
+  }
+  if (e.key === 'ArrowRight') {
+    angleSlider.value = Math.min(45, parseFloat(angleSlider.value) + step);
+    angleSlider.dispatchEvent(new Event('input'));
+  }
+});
+
+// ===== Egér/trackpad húzás =====
+let dragging = false, startX = 0, startAngle = 0;
+document.body.addEventListener('mousedown', (e)=>{
+  if (!running) return;
+  dragging = true;
+  startX = e.clientX;
+  startAngle = parseFloat(angleSlider.value) || 0;
+});
+document.body.addEventListener('mousemove', (e)=>{
+  if (!running || !dragging) return;
+  const dx = e.clientX - startX;
+  const sensitivity = 0.2; // px → fok
+  let ang = startAngle + dx * sensitivity;
+  ang = Math.max(-45, Math.min(45, ang));
+  angleSlider.value = ang;
+  angleSlider.dispatchEvent(new Event('input'));
+});
+window.addEventListener('mouseup', ()=> dragging = false);
+
+// ===== Gombok =====
 startBtn.addEventListener('click', startAudio);
 stopBtn.addEventListener('click', stopAudio);
