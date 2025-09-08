@@ -1,7 +1,7 @@
 /* KPR Superposition Prototype — HEAD + SLIDER + KEYBOARD + MOUSE
    - Telefon: deviceorientation (gamma) vezérli a bal/jobb gaineket
-   - MacBook: automatikus fallback → csúszka, + nyilak + egérhúzás
-   - Equal-power crossfade, smoothing, deadzone
+   - MacBook: automatikusan csúszka mód (+ nyilak + egérhúzás)
+   - Középállásban csak a center szól; szélek felé a kiválasztott oldal nő, a center halkul
 */
 
 const startBtn = document.getElementById('startBtn');
@@ -30,30 +30,42 @@ const FILES = {
 // ===== Segédek =====
 function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
 
-const RANGE = 45;          // max döntés (±45°)
-const DEADZONE = 3;        // középen ennyi fokig halott zóna
-const SMOOTH_ALPHA = 0.15; // smoothing (0..1)
+// Beállítások
+const RANGE = 45;           // max döntés (±45°)
+const DEADZONE = 3;         // középen ennyi fok „halott zóna”
+const SMOOTH_ALPHA = 0.15;  // smoothing (0..1)
+const CENTER_MIN = 0.35;    // ennyire halkul le a közép szélső állásban (0..1)
 
-function mapAngle(rawDeg){
+// deadzone + clamp
+function normAngle(rawDeg){
   let a = rawDeg;
   if (Math.abs(a) < DEADZONE) a = 0;
-  a = clamp(a, -RANGE, RANGE);
-  return a;
+  return clamp(a, -RANGE, RANGE);
 }
 
+// Középen bal=0, jobb=0; szélek felé a választott oldal nő; közép gain csökken
 function angleToGains(angleDeg){
-  const a = mapAngle(angleDeg);
-  const t = (a + RANGE) / (2*RANGE); // 0..1
-  const left = Math.cos(t * Math.PI * 0.5);
-  const right = Math.sin(t * Math.PI * 0.5);
-  const center = 1.0;
-  return {left, center, right};
+  const a = normAngle(angleDeg);
+  const x = a / RANGE; // -1..1
+
+  // oldal-erősségek (0..1), középen 0
+  const Lraw = Math.max(0, -x); // bal
+  const Rraw = Math.max(0,  x); // jobb
+
+  // equal-power jelleg: lágy felfutás
+  const left  = Math.sin(Lraw * Math.PI * 0.5);
+  const right = Math.sin(Rraw * Math.PI * 0.5);
+
+  // közép: középen 1, széleken CENTER_MIN
+  const center = 1 - (1 - CENTER_MIN) * Math.abs(x);
+
+  return { left, center, right };
 }
 
 function updateMeters(g){
-  meters.left.style.width = (g.left*100).toFixed(1)+'%';
+  meters.left.style.width   = (g.left*100).toFixed(1)+'%';
   meters.center.style.width = (g.center*100).toFixed(1)+'%';
-  meters.right.style.width = (g.right*100).toFixed(1)+'%';
+  meters.right.style.width  = (g.right*100).toFixed(1)+'%';
 }
 
 // ===== Szenzor kezelés =====
@@ -69,9 +81,9 @@ function applyAngle(angle){
   gammaVal.textContent = angle.toFixed(1);
   const g = angleToGains(angle);
   const t = ctx.currentTime;
-  gains.left.gain.linearRampToValueAtTime(g.left,   t+0.05);
-  gains.center.gain.linearRampToValueAtTime(g.center,t+0.05);
-  gains.right.gain.linearRampToValueAtTime(g.right, t+0.05);
+  gains.left.gain.linearRampToValueAtTime(  g.left,   t+0.05);
+  gains.center.gain.linearRampToValueAtTime(g.center, t+0.05);
+  gains.right.gain.linearRampToValueAtTime( g.right,  t+0.05);
   updateMeters(g);
 }
 
@@ -134,13 +146,19 @@ async function startAudio(){
   buffers.right  = await loadBuffer(FILES.right);
 
   const master = ctx.createGain(); master.gain.value = 1.0; master.connect(ctx.destination);
-  gains.left = ctx.createGain(); gains.left.connect(master);
-  gains.center = ctx.createGain(); gains.center.connect(master);
-  gains.right = ctx.createGain(); gains.right.connect(master);
+  gains.left = ctx.createGain();
+  gains.center = ctx.createGain();
+  gains.right = ctx.createGain();
 
-  sources.left = ctx.createBufferSource(); sources.left.buffer = buffers.left; sources.left.loop = true; sources.left.connect(gains.left);
-  sources.center = ctx.createBufferSource(); sources.center.buffer = buffers.center; sources.center.loop = true; sources.center.connect(gains.center);
-  sources.right = ctx.createBufferSource(); sources.right.buffer = buffers.right; sources.right.loop = true; sources.right.connect(gains.right);
+  // Csatlakoztatás
+  gains.left.connect(master);
+  gains.center.connect(master);
+  gains.right.connect(master);
+
+  // Források
+  sources.left = ctx.createBufferSource();  sources.left.buffer  = buffers.left;   sources.left.loop  = true; sources.left.connect(gains.left);
+  sources.center = ctx.createBufferSource();sources.center.buffer= buffers.center; sources.center.loop= true; sources.center.connect(gains.center);
+  sources.right = ctx.createBufferSource(); sources.right.buffer = buffers.right;  sources.right.loop = true; sources.right.connect(gains.right);
 
   const now = ctx.currentTime + 0.05;
   sources.left.start(now); sources.center.start(now); sources.right.start(now);
@@ -201,13 +219,13 @@ angleSlider.addEventListener('input', ()=>{
 // ===== Billentyű: bal/jobbra nyíl =====
 window.addEventListener('keydown', (e)=>{
   if (!running) return;
-  const step = 2;
+  const step = 2; // fok
   if (e.key === 'ArrowLeft') {
-    angleSlider.value = Math.max(-45, parseFloat(angleSlider.value) - step);
+    angleSlider.value = Math.max(-RANGE, parseFloat(angleSlider.value) - step);
     angleSlider.dispatchEvent(new Event('input'));
   }
   if (e.key === 'ArrowRight') {
-    angleSlider.value = Math.min(45, parseFloat(angleSlider.value) + step);
+    angleSlider.value = Math.min(RANGE, parseFloat(angleSlider.value) + step);
     angleSlider.dispatchEvent(new Event('input'));
   }
 });
@@ -225,7 +243,7 @@ document.body.addEventListener('mousemove', (e)=>{
   const dx = e.clientX - startX;
   const sensitivity = 0.2; // px → fok
   let ang = startAngle + dx * sensitivity;
-  ang = Math.max(-45, Math.min(45, ang));
+  ang = Math.max(-RANGE, Math.min(RANGE, ang));
   angleSlider.value = ang;
   angleSlider.dispatchEvent(new Event('input'));
 });
