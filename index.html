@@ -7,90 +7,36 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Top Nav -->
-  <header class="site-header">
-    <div class="container header-row">
-      <div class="brand">KPR</div>
-      <nav class="main-nav">
-        <a href="#experiment" class="nav-link">Start Experiment</a>
-        <a href="#about" class="nav-link">About</a>
-        <a href="#diagnostics" class="nav-link">Diagnostics</a>
-      </nav>
+  <!-- Matrix background -->
+  <canvas id="matrix"></canvas>
+
+  <main class="center-wrap">
+    <h1>Superposition Audio</h1>
+    <p class="tagline">Tilt left = alive • Tilt right = flatline</p>
+
+    <div class="controls">
+      <button id="startBtn" class="btn primary">Start Experiment</button>
+      <button id="stopBtn" class="btn" disabled>Stop</button>
     </div>
-  </header>
 
-  <!-- Hero with cat -->
-  <section class="hero">
-    <div class="container hero-inner">
-      <div class="hero-copy">
-        <h1>Superposition Audio</h1>
-        <p class="tagline">Tip your head left or right. In the center, only the middle stem plays.</p>
-        <div class="cta">
-          <a href="#experiment" class="btn primary">Start Now</a>
-        </div>
-      </div>
-      <div class="hero-art">
-        <!-- Put your cat image at: img/cat.png -->
-        <img src="img/cat.png" alt="Schrödinger’s cat illustration" />
+    <div class="meters">
+      <div class="meter"><div id="leftMeter"></div></div>
+      <div class="meter"><div id="centerMeter"></div></div>
+      <div class="meter"><div id="rightMeter"></div></div>
+    </div>
+
+    <div class="manual">
+      <input id="angleSlider" type="range" min="-45" max="45" value="0" step="1" />
+      <div class="hints">
+        <span id="statusText">idle</span> • 
+        <span id="sensorText">no permission</span> • 
+        γ=<span id="gammaVal">0</span>°
       </div>
     </div>
-  </section>
-
-  <!-- Experiment panel (IDs unchanged for your JS) -->
-  <main class="container" id="experiment">
-    <section class="panel controls">
-      <div class="btns">
-        <button id="startBtn" class="btn primary">Load & Play</button>
-        <button id="stopBtn" class="btn" disabled>Stop</button>
-      </div>
-      <p class="hint">
-        Required files present at site root (or <code>audio/</code>): <code>left.(wav|mp3)</code>, <code>center.(wav|mp3)</code>, <code>right.(wav|mp3)</code>.
-      </p>
-    </section>
-
-    <section class="grid">
-      <div class="panel status">
-        <h3>Status</h3>
-        <div class="kv"><span>Player:</span> <strong id="statusText">idle</strong></div>
-        <div class="kv"><span>Device sensor:</span> <strong id="sensorText">no permission</strong></div>
-        <div class="kv"><span>Angle (γ, °):</span> <strong id="gammaVal">0</strong></div>
-      </div>
-
-      <div class="panel meters">
-        <h3>Mix Meters</h3>
-        <label>Left</label>
-        <div class="meter"><div id="leftMeter"></div></div>
-        <label>Center</label>
-        <div class="meter"><div id="centerMeter"></div></div>
-        <label>Right</label>
-        <div class="meter"><div id="rightMeter"></div></div>
-      </div>
-
-      <div class="panel interact">
-        <h3>Manual Control</h3>
-        <p>If no sensor is available (laptop), use the slider or ←/→ keys. You can also drag with the mouse.</p>
-        <input id="angleSlider" type="range" min="-45" max="45" value="0" step="1" />
-      </div>
-    </section>
-
-    <section class="panel debug" id="diagnostics">
-      <h3>Diagnostics</h3>
-      <div id="debugLog" class="log">(log will appear here)</div>
-    </section>
   </main>
 
-  <section class="container about" id="about">
-    <div class="panel">
-      <h3>About the Project</h3>
-      <p>This is a small experiment on interactive listening. In center position only the middle stem is audible; as you tilt left or right, the corresponding stem fades in while center gently attenuates.</p>
-    </div>
-  </section>
-
-  <footer class="site-footer">
-    <div class="container">
-      <small>Tip: On iOS, allow Motion &amp; Orientation access. Headphones recommended.</small>
-    </div>
-  </footer>
+  <!-- ECG overlay -->
+  <canvas id="ecg"></canvas>
 
   <script src="script.js"></script>
 </body>
