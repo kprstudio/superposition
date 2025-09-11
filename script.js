@@ -1,8 +1,5 @@
-/* Minimal UI + Matrix background + ECG + Audio superposition
-   - Start/Stop only, slider fallback
-   - Matrix "code rain" background
-   - ECG: left (alive) = green heartbeat, right (dead) = red flatline
-   - Smooth gain changes
+/* Minimal Superposition — smooth fades, sensor-first, slider fallback
+   - Files: left/center/right in root or audio/, .wav or .mp3
 */
 
 const startBtn = document.getElementById('startBtn');
@@ -21,7 +18,7 @@ const meters = {
 let ctx, gains = {}, sources = {}, buffers = {};
 let running = false;
 
-// ===== Audio loader (tries root/audio × wav/mp3) =====
+// ===== Robust loader (root/audio × wav/mp3) =====
 const EXT_PREF = ['wav','mp3'];
 const PATHS = ['', 'audio/'];
 
@@ -32,13 +29,14 @@ async function tryFetchDecode(url){
   return await ctx.decodeAudioData(arr);
 }
 async function loadOneBuffer(base){
+  let lastErr=null;
   for (const p of PATHS){
     for (const ext of EXT_PREF){
       const url = `${p}${base}.${ext}`;
-      try { return await tryFetchDecode(url); } catch(e){}
+      try { return await tryFetchDecode(url); } catch(e){ lastErr=e; }
     }
   }
-  throw new Error(`Missing ${base}.* at root or audio/`);
+  throw lastErr ?? new Error(`Missing ${base}.* at root or audio/`);
 }
 
 // ===== Mix behaviour =====
@@ -79,8 +77,6 @@ function applyAngle(angle){
   smoothGain(gains.center, g.center);
   smoothGain(gains.right, g.right);
   updateMeters(g);
-  // drive ECG mood (alive on left, dead on right)
-  modeAlive = (angle <= 0); // <=0 left or center -> alive
 }
 
 function enableOrientation(){
@@ -102,7 +98,6 @@ function disableOrientation(){
   orientationHandler=null; sensorActive=false;
   sensorText.textContent = 'manual (slider)';
 }
-
 async function requestMotionPermissionIfNeeded(){
   try{
     const need = (window.DeviceMotionEvent && typeof window.DeviceMotionEvent.requestPermission==='function')
@@ -121,7 +116,6 @@ async function startAudio(){
   statusText.textContent='loading…';
   ctx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'playback'});
 
-  // load
   try{
     buffers.left   = await loadOneBuffer('left');
     buffers.center = await loadOneBuffer('center');
@@ -130,10 +124,10 @@ async function startAudio(){
     statusText.textContent='load error'; alert(e.message); running=false; return;
   }
 
-  // graph: gains -> master -> comp -> out
   const master = ctx.createGain(); master.gain.value = 0.9;
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value=-12; comp.knee.value=20; comp.ratio.value=2.5; comp.attack.value=0.005; comp.release.value=0.2;
+
   gains.left=ctx.createGain(); gains.center=ctx.createGain(); gains.right=ctx.createGain();
   gains.left.connect(master); gains.center.connect(master); gains.right.connect(master);
   master.connect(comp); comp.connect(ctx.destination);
@@ -156,10 +150,8 @@ async function startAudio(){
   window.addEventListener('deviceorientation',probe,{passive:true});
   if (granted) enableOrientation(); else { usingSlider=true; sensorText.textContent='manual (slider)'; }
   setTimeout(()=>{ window.removeEventListener('deviceorientation',probe); if(!got){ usingSlider=true; disableOrientation(); } },2000);
-
-  // start visuals
-  startMatrix(); startECG();
 }
+
 function stopAudio(){
   if(!running) return; running=false;
   try{ sources.left.stop(); }catch(_){}
@@ -197,99 +189,3 @@ window.addEventListener('mouseup',()=> dragging=false);
 // Buttons
 startBtn.addEventListener('click', startAudio);
 stopBtn .addEventListener('click', stopAudio);
-
-// ===== Matrix "code rain" =====
-const mCanvas=document.getElementById('matrix');
-const mCtx=mCanvas.getContext('2d');
-let mCols=0, mDrops=[], mW=0, mH=0;
-function resizeMatrix(){
-  mW= mCanvas.width = window.innerWidth;
-  mH= mCanvas.height= window.innerHeight;
-  const fontSize=16;
-  mCols = Math.floor(mW / fontSize);
-  mDrops = new Array(mCols).fill(0).map(()=> Math.random()*mH);
-  mCtx.font = fontSize+'px monospace';
-}
-window.addEventListener('resize', resizeMatrix); resizeMatrix();
-
-function drawMatrix(){
-  // fade
-  mCtx.fillStyle='rgba(5,6,7,0.08)';
-  mCtx.fillRect(0,0,mW,mH);
-  // glyphs
-  for(let i=0;i<mCols;i++){
-    const ch = String.fromCharCode(0x30A0 + Math.random()*96|0); // katakana-ish
-    mCtx.fillStyle = 'rgba(0,255,128,0.75)'; // matrix green
-    mCtx.fillText(ch, i*16, mDrops[i]);
-    mDrops[i] = (mDrops[i] > mH || Math.random()>0.975) ? 0 : (mDrops[i]+16);
-  }
-}
-let matrixAnim;
-function startMatrix(){
-  cancelAnimationFrame(matrixAnim);
-  (function loop(){ drawMatrix(); matrixAnim=requestAnimationFrame(loop); })();
-}
-
-// ===== ECG visual =====
-const ecgCanvas = document.getElementById('ecg');
-const eCtx = ecgCanvas.getContext('2d');
-let eW=0,eH=0, ecgX=0, modeAlive=true; // toggled by applyAngle()
-
-function resizeECG(){
-  eW = ecgCanvas.width = window.innerWidth;
-  eH = ecgCanvas.height= Math.floor(window.innerHeight*0.28);
-}
-window.addEventListener('resize', resizeECG); resizeECG();
-
-function drawECG(){
-  // fade trail
-  eCtx.fillStyle='rgba(0,0,0,0.35)';
-  eCtx.fillRect(0,0,eW,eH);
-
-  // grid
-  eCtx.strokeStyle='rgba(113,167,255,0.12)';
-  eCtx.lineWidth=1;
-  eCtx.beginPath();
-  for(let x=0;x<eW;x+=20){ eCtx.moveTo(x,0); eCtx.lineTo(x,eH); }
-  for(let y=0;y<eH;y+=20){ eCtx.moveTo(0,y); eCtx.lineTo(eW,y); }
-  eCtx.stroke();
-
-  // baseline
-  const mid = Math.floor(eH*0.6);
-  eCtx.strokeStyle='rgba(200,220,255,0.15)';
-  eCtx.beginPath(); eCtx.moveTo(0,mid); eCtx.lineTo(eW,mid); eCtx.stroke();
-
-  // waveform
-  const color = modeAlive ? 'rgba(0,255,136,0.95)' : 'rgba(255,59,59,0.95)';
-  eCtx.strokeStyle=color; eCtx.lineWidth=2;
-
-  eCtx.beginPath();
-  let x=0;
-  const speed = 4; // px/frame
-  ecgX = (ecgX + speed) % eW;
-
-  // draw across screen
-  function sample(i){
-    if(!modeAlive) return mid; // flatline
-    // heartbeat shape: quick spike + damped sine
-    const t = ((i+ecgX)%eW)/eW; // 0..1
-    const phase = (t*4)%1;      // 4 beats/width
-    let y=mid;
-    if(phase<0.04){ // sharp QRS spike
-      const k=phase/0.04; y = mid - (50*(1-Math.abs(2*k-1))); 
-    } else {
-      const tt = (phase-0.04)*10;
-      y = mid - 18*Math.exp(-tt)*Math.sin(tt*6.0);
-    }
-    return Math.max(0,Math.min(eH,y));
-  }
-
-  eCtx.moveTo(0, sample(0));
-  for(x=1;x<eW;x++){ eCtx.lineTo(x, sample(x)); }
-  eCtx.stroke();
-}
-let ecgAnim;
-function startECG(){
-  cancelAnimationFrame(ecgAnim);
-  (function loop(){ drawECG(); ecgAnim=requestAnimationFrame(loop); })();
-}
